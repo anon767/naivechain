@@ -1,24 +1,58 @@
-# Naivechain - a blockchain implementation in 200 lines of code
+# Naivechain Extended
 
-### Motivation
-All the current implementations of blockchains are tightly coupled with the larger context and problems they (e.g. Bitcoin or Ethereum) are trying to solve. This makes understanding blockchains a necessarily harder task, than it must be. Especially source-code-wisely. This project is an attempt to provide as concise and simple implementation of a blockchain as possible.
+This is a Fork from https://github.com/lhartikk/naivechain
 
+There are few things which I needed to add to lhartikk's simple but genius
+blockchain implementation for my university research.
+
+## Added Features
+
+1) ProofOfWork based on the Hash algorithm Scrypt
+2) Wallet holding a RSA private key used to sign blocks
+3) unique address to identify peer
+4) peer exchange functionality
+
+In case someone is interested in this project, I'll add some basic information about
+how my features are working and why.
  
-### What is blockchain
-[From Wikipedia](https://en.wikipedia.org/wiki/Blockchain_(database)) : Blockchain is a distributed database that maintains a continuously-growing list of records called blocks secured from tampering and revision.
+## Proof of Work
+Because the principle of Blockchains is to keep the longest chain, it is possible in theory
+for one person to generate a large but finite amount of blocks in a row, which could cause a 
+Denial of Service. Imagine Alice mines a legit Block and propagates it through the network, while
+Bob just generated hundreds of Blocks in a second without accepting Alice's. 
+The consequence is that Bob spammed the Network and caused Alice's Block not to be accepted.
 
-### Key concepts of Naivechain
-Check also [this blog post](https://medium.com/@lhartikk/a-blockchain-in-200-lines-of-code-963cc1cc0e54#.dttbm9afr5) for a more detailed overview of the key concepts
-* HTTP interface to control the node
-* Use Websockets to communicate with other nodes (P2P)
-* Super simple "protocols" in P2P communication
-* Data is not persisted in nodes
-* No proof-of-work or proof-of-stake: a block can be added to the blockchain without competition
+Proof-Of-Work consists of a small mathematical calculation, which delays the mining of a block.
+The solution to that given problem should be fairly hard to calculate but easy to proof.
+
+Here before mining a block we use the hash of the preceding block and concatenate it with _i_=0.
+Afterwards a hash-algorithm called Scrypt is used to generate a new hash. _i_ will be incremented as long as the resulting 
+Scrypt-Hash begins with a leaging Zero _0_.
+
+_i_ is appended to the mined block. The block will be accepted if _lasthash+i_[0] == 0
+
+In my tests mining a block took from 10s to 1 min.
+
+Sources:
+1) https://en.bitcoin.it/wiki/Proof_of_work
+2) https://en.wikipedia.org/wiki/Proof-of-work_system
+3) https://en.bitcoin.it/wiki/Scrypt_proof_of_work
+
+## Wallet
+
+Most commonly Blockchain users need a Wallet that holds their private key to sign and identify themselves and their relative Transactions.
+A generated RSA-private-key is used to sign the Block. Every Block keeps the public-key of the peer, so everybody is
+cabable to check if the block is correctly signed. The appended Address is the hashed public-key.
+
+Sources:
+1) https://en.bitcoin.it/wiki/Address
+
+## Extended P2P Feature
+
+This one, I didnt tested thoroughly. I needed a Feature that let users gather peers from already obtained peers.
+So the network is not stagnating.
 
 
-![alt tag](naivechain_blockchain.png)
-
-![alt tag](naivechain_components.png)
 
 ### Quick start
 (set up two connected nodes and mine 1 block)
