@@ -3,26 +3,23 @@ var CryptoJS = require("crypto-js");
 var express = require("express");
 var bodyParser = require('body-parser');
 var WebSocket = require("ws");
-
+const Wallet = require('./class/wallet.js');
+const Block = require('./class/block.js');
+const ProofOfWork = require('./class/ProofOfWork.js');
+var proofOfWork = new ProofOfWork();
+var wallet = new Wallet();
 var http_port = process.env.HTTP_PORT || 3001;
 var p2p_port = process.env.P2P_PORT || 6001;
 var initialPeers = process.env.PEERS ? process.env.PEERS.split(',') : [];
 
-class Block {
-    constructor(index, previousHash, timestamp, data, hash) {
-        this.index = index;
-        this.previousHash = previousHash.toString();
-        this.timestamp = timestamp;
-        this.data = data;
-        this.hash = hash.toString();
-    }
-}
-
+var peers = [];
+var keys = [];
 var sockets = [];
 var MessageType = {
     QUERY_LATEST: 0,
     QUERY_ALL: 1,
-    RESPONSE_BLOCKCHAIN: 2
+    RESPONSE_BLOCKCHAIN: 2,
+    RESPONSE_PEERS: 3
 };
 
 var getGenesisBlock = () => {
@@ -37,7 +34,7 @@ var initHttpServer = () => {
 
     app.get('/blocks', (req, res) => res.send(JSON.stringify(blockchain)));
     app.post('/mineBlock', (req, res) => {
-        var newBlock = generateNextBlock(req.body.data);
+        var newBlock = generateNextBlock(wallet.encrypt(req.body.data));
         addBlock(newBlock);
         broadcast(responseLatestMsg());
         console.log('block added: ' + JSON.stringify(newBlock));
@@ -82,6 +79,9 @@ var initMessageHandler = (ws) => {
             case MessageType.RESPONSE_BLOCKCHAIN:
                 handleBlockchainResponse(message);
                 break;
+            case MessageType.RESPONSE_PEERS:
+                responseMyPeers();
+                break;
         }
     });
 };
@@ -101,7 +101,9 @@ var generateNextBlock = (blockData) => {
     var nextIndex = previousBlock.index + 1;
     var nextTimestamp = new Date().getTime() / 1000;
     var nextHash = calculateHash(nextIndex, previousBlock.hash, nextTimestamp, blockData);
-    return new Block(nextIndex, previousBlock.hash, nextTimestamp, blockData, nextHash);
+    var signature = wallet.sign(nextHash.toString());
+    var proof = proofOfWork.hash(nextHash);
+    return new Block(nextIndex, previousBlock.hash, nextTimestamp, blockData, nextHash, signature, wallet.getKey(), wallet.getAddress(), proof);
 };
 
 
@@ -118,8 +120,18 @@ var addBlock = (newBlock) => {
         blockchain.push(newBlock);
     }
 };
-
+var checkSignature = (key, signature, hash) => {
+    var NodeRSA = require('node-rsa');
+    var keyobject = new NodeRSA();
+    keyobject.importKey(key, "pkcs8-public-pem");
+    return keyobject.verify(hash, signature);
+};
+var checkAddress = (key, address) => {
+    var CryptoJS = require("crypto-js");
+    return CryptoJS.MD5(key).toString() == address;
+};
 var isValidNewBlock = (newBlock, previousBlock) => {
+    if (newBlock.index === 0) return true;
     if (previousBlock.index + 1 !== newBlock.index) {
         console.log('invalid index');
         return false;
@@ -130,12 +142,23 @@ var isValidNewBlock = (newBlock, previousBlock) => {
         console.log(typeof (newBlock.hash) + ' ' + typeof calculateHashForBlock(newBlock));
         console.log('invalid hash: ' + calculateHashForBlock(newBlock) + ' ' + newBlock.hash);
         return false;
+    } else if (!checkSignature(newBlock.publickey, newBlock.signature, newBlock.hash)) {
+        console.log("signature mismatch");
+        return false;
+    } else if (!checkAddress(newBlock.publickey, newBlock.address)) {
+        console.log("invalid address/key pair");
+        return false;
+    } else if (!proofOfWork.verify(newBlock.hash, newBlock.proof)) {
+        console.log("invalid Proof");
+        return false;
     }
     return true;
 };
 
 var connectToPeers = (newPeers) => {
     newPeers.forEach((peer) => {
+        if (peers.indexOf(peer) < 0)
+            peers.push(peer);
         var ws = new WebSocket(peer);
         ws.on('open', () => initConnection(ws));
         ws.on('error', () => {
@@ -194,14 +217,17 @@ var isValidChain = (blockchainToValidate) => {
 var getLatestBlock = () => blockchain[blockchain.length - 1];
 var queryChainLengthMsg = () => ({'type': MessageType.QUERY_LATEST});
 var queryAllMsg = () => ({'type': MessageType.QUERY_ALL});
-var responseChainMsg = () =>({
+var responseChainMsg = () => ({
     'type': MessageType.RESPONSE_BLOCKCHAIN, 'data': JSON.stringify(blockchain)
 });
 var responseLatestMsg = () => ({
     'type': MessageType.RESPONSE_BLOCKCHAIN,
     'data': JSON.stringify([getLatestBlock()])
 });
-
+var responseMyPeers = () => ({
+    'type': MessageType.RESPONSE_PEERS,
+    'data': JSON.stringify(peers)
+});
 var write = (ws, message) => ws.send(JSON.stringify(message));
 var broadcast = (message) => sockets.forEach(socket => write(socket, message));
 
